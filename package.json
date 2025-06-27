@@ -1,0 +1,14 @@
+{
+  "name": "whatsapp-openai-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp бот на Node.js с интеграцией OpenAI через Baileys",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.0",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5"
+  }
+}

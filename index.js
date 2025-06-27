@@ -2,18 +2,62 @@ require('dotenv').config();
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const axios = require('axios');
 const fs = require('fs');
-const path = require('path');
+const express = require('express');
+const QRCode = require('qrcode');
 
 const AUTH_DIR = './auth_info';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const PORT = process.env.PORT || 3000;
+
+let latestQR = null; // хранит последний QR-код
 
 if (!OPENAI_API_KEY) {
   console.error('❌ Не найден ключ OPENAI_API_KEY в .env');
   process.exit(1);
 }
 
+// Веб-сервер для отображения QR-кода
+const app = express();
+
+app.get('/', (req, res) => {
+  res.send(`
+    <h2>WhatsApp OpenAI Бот</h2>
+    <p>Статус: <span id="status">Ожидание...</span></p>
+    <div id="qr"></div>
+    <script>
+      async function fetchQR() {
+        const r = await fetch('/qr');
+        if (r.status === 200) {
+          const { qr } = await r.json();
+          if (qr) {
+            document.getElementById('qr').innerHTML = '<img src="'+qr+'" alt="QR Code"/><p>Отсканируйте QR-код WhatsApp</p>';
+            document.getElementById('status').textContent = "Ожидает сканирования...";
+          } else {
+            document.getElementById('qr').innerHTML = '';
+            document.getElementById('status').textContent = "Бот авторизован!";
+          }
+        }
+      }
+      setInterval(fetchQR, 2000);
+      fetchQR();
+    </script>
+  `);
+});
+
+app.get('/qr', async (req, res) => {
+  if (latestQR) {
+    const dataUrl = await QRCode.toDataURL(latestQR);
+    res.json({ qr: dataUrl });
+  } else {
+    res.json({ qr: null });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`🌍 Веб-интерфейс доступен на http://localhost:${PORT}`);
+});
+
 async function connectToWhatsApp() {
-  // Готовим директорию для хранения сессии
   if (!fs.existsSync(AUTH_DIR)) {
     fs.mkdirSync(AUTH_DIR);
   }
@@ -21,13 +65,18 @@ async function connectToWhatsApp() {
 
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: true,
+    // printQRInTerminal: true, // убираем, чтобы не было warning
   });
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
+    if (qr) {
+      latestQR = qr;
+      console.log('📱 QR-код обновлен! Проверьте веб-интерфейс.');
+    }
     if (connection === 'close') {
       const reason = lastDisconnect?.error?.output?.statusCode;
+      latestQR = null;
       if (reason === DisconnectReason.loggedOut) {
         console.log('🔌 Соединение закрыто. Требуется повторная авторизация.');
         process.exit(0);
@@ -36,12 +85,10 @@ async function connectToWhatsApp() {
         connectToWhatsApp();
       }
     } else if (connection === 'open') {
+      latestQR = null;
       console.log('✅ Подключено к WhatsApp!');
     } else if (connection === 'connecting') {
       console.log('⏳ Подключение к WhatsApp...');
-    }
-    if (qr) {
-      console.log('📱 Отсканируйте QR-код для авторизации.');
     }
   });
 
@@ -100,9 +147,8 @@ console.log(`
 ---------------------------
 Инструкция по запуску бота:
 1. npm install
-2. Создайте файл .env со строкой:
-   OPENAI_API_KEY=ваш_ключ_OpenAI
+2. Создайте .env с ключом OPENAI_API_KEY
 3. node index.js
-4. Отсканируйте QR-код
+4. Откройте http://localhost:3000 для сканирования QR-кода
 ---------------------------
 `);
